@@ -8,48 +8,84 @@ const BloodSugarDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Load and parse CSV data from public folder
+  // Load and parse CSV data from Google Sheets or local file
   useEffect(() => {
     const loadCSVData = async () => {
       try {
         setLoading(true);
-        // Fetch CSV from public folder - Vite serves files from public/ at the root
-        const response = await fetch('/data/bloodsugar-data.csv');
+        
+        // Configuration - In a real project, use environment variables:
+        // const GOOGLE_SHEET_ID = process.env.REACT_APP_GOOGLE_SHEET_ID || process.env.VITE_GOOGLE_SHEET_ID;
+        
+        // For artifacts/demo purposes, set your Sheet ID here:
+        const GOOGLE_SHEET_ID = import.meta.env.VITE_GOOGLE_SHEET_ID;
+        
+        // Google Sheets CSV export URL
+        const GOOGLE_SHEET_URL = `https://docs.google.com/spreadsheets/d/${GOOGLE_SHEET_ID}/export?format=csv&gid=0`;
+        
+        // Local CSV file (fallback)
+        const LOCAL_CSV_URL = '/data/bloodsugar-data.csv';
+        
+        // Try Google Sheets first if ID is configured, otherwise use local
+        let csvUrl = GOOGLE_SHEET_ID && GOOGLE_SHEET_ID.trim() !== ''
+              ? GOOGLE_SHEET_URL 
+              : LOCAL_CSV_URL;
+        
+        console.log(`Attempting to fetch data from: ${csvUrl}`);
+        
+        const response = await fetch(csvUrl);
         
         if (!response.ok) {
-          throw new Error(`Failed to load CSV file: ${response.status} ${response.statusText}`);
+          // If Google Sheets fails, try local file as fallback
+          if (csvUrl === GOOGLE_SHEET_URL) {
+            console.warn('Failed to load from Google Sheets, trying local file...');
+            const fallbackResponse = await fetch(LOCAL_CSV_URL);
+            if (!fallbackResponse.ok) {
+              throw new Error(`Failed to load CSV file from both Google Sheets and local source. Check console for details.`);
+            }
+            const csvData = await fallbackResponse.text();
+            parseCSV(csvData, 'local file');
+          } else {
+            throw new Error(`Failed to load local CSV file: ${response.status} ${response.statusText}`);
+          }
+        } else {
+          const csvData = await response.text();
+          const source = csvUrl === GOOGLE_SHEET_URL ? 'Google Sheets' : 'local file';
+          parseCSV(csvData, source);
         }
         
-        const csvData = await response.text();
-        
-        Papa.parse(csvData, {
-          header: true,
-          dynamicTyping: true,
-          skipEmptyLines: true,
-          delimitersToGuess: [',', '\t', '|', ';'],
-          complete: (results) => {
-            if (results.errors.length > 0) {
-              console.warn('CSV parsing warnings:', results.errors);
-            }
-            
-            // Clean headers by trimming whitespace
-            const cleanedData = results.data.map(row => {
-              const cleanedRow = {};
-              Object.keys(row).forEach(key => {
-                const cleanKey = key.trim();
-                cleanedRow[cleanKey] = row[key];
+        function parseCSV(csvData, source) {
+          console.log(`Successfully loaded data from ${source}`);
+          Papa.parse(csvData, {
+            header: true,
+            dynamicTyping: true,
+            skipEmptyLines: true,
+            delimitersToGuess: [',', '\t', '|', ';'],
+            complete: (results) => {
+              if (results.errors.length > 0) {
+                console.warn('CSV parsing warnings:', results.errors);
+              }
+              
+              // Clean headers by trimming whitespace
+              const cleanedData = results.data.map(row => {
+                const cleanedRow = {};
+                Object.keys(row).forEach(key => {
+                  const cleanKey = key.trim();
+                  cleanedRow[cleanKey] = row[key];
+                });
+                return cleanedRow;
               });
-              return cleanedRow;
-            });
-            
-            setBloodSugarData(cleanedData);
-            setLoading(false);
-          },
-          error: (error) => {
-            setError(`Error parsing CSV: ${error.message}`);
-            setLoading(false);
-          }
-        });
+              
+              console.log(`Processed ${cleanedData.length} records from ${source}`);
+              setBloodSugarData(cleanedData);
+              setLoading(false);
+            },
+            error: (error) => {
+              setError(`Error parsing CSV from ${source}: ${error.message}`);
+              setLoading(false);
+            }
+          });
+        }
       } catch (err) {
         setError(`Error loading CSV file: ${err.message}`);
         setLoading(false);
@@ -182,7 +218,7 @@ const BloodSugarDashboard = () => {
           <h2 className="text-red-800 font-semibold mb-2">Error Loading Data</h2>
           <p className="text-red-600">{error}</p>
           <p className="text-sm text-red-500 mt-2">
-            Make sure your CSV file is located at <code>public/data/bloodsugar-data.csv</code> and contains the expected columns: date, sugarLevel, type, time, notes
+            Make sure your Google Sheet is publicly accessible or that your CSV file is located at <code>public/data/bloodsugar-data.csv</code> and contains the expected columns: date, sugarLevel, type, time, notes
           </p>
         </div>
       </div>
